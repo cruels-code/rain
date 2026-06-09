@@ -82,26 +82,26 @@
       gustDecay:             2.5,     // how quickly gusts fade back to baseline
 
       // --- Ripples ---
-      rippleCount:           600000,  // instanced mesh pool size
+      rippleCount:           500000,  // instanced mesh pool size
       rippleMaxScale:        1.5,     // maximum ripple diameter at full expansion
       rippleSizeVariance:    0.35,    // up to this fraction smaller (0.35 = up to 35% smaller)
       rippleLifeMin:         0.8,     // minimum ripple lifetime in seconds
       rippleLifeRange:       0.6,     // random extra lifetime in seconds
 
       // --- Splash Discs (afterimage when a ripple completes) ---
-      splashCount:           600000,  // instanced mesh pool size
+      splashCount:           500000,  // instanced mesh pool size
       splashOpacity:         0.03,    // base opacity of the filled disc (0–1)
       splashLifeMultiplier:  3.0,     // how many times longer splash lives vs its parent ripple
 
       // --- Depth of Field ---
-      dofFocus:              200.0,    // focus distance
+      dofFocus:              75.0,    // focus distance
       dofAperture:           0.00015,  // depth of field strength (small is strong)
       dofMaxBlur:            0.003,   // blur radius
 
       // --- Bloom (Unreal Glow) ---
-      bloomStrength:         0.4,     // strength of the glow
-      bloomRadius:           0.5,     // glow radius
-      bloomThreshold:        0.1,     // lower makes darker areas glow
+      bloomStrength:         0.0,     // strength of the glow
+      bloomRadius:           0.0,     // glow radius
+      bloomThreshold:        0.0,     // lower makes darker areas glow
 
     };
     // ============================================================
