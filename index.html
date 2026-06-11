@@ -390,7 +390,7 @@
           float nx = (driftX + uDriftOffset.x) * 0.01;
           float nz = (driftZ + uDriftOffset.y) * 0.01;
           float n = snoise(vec2(nx, nz) + uTime * 0.1) * 0.5 + 0.5;
-          float spawnChance = max(0.015, pow(1.0 - n, 2.0));
+          float spawnChance = max(0.002, pow(1.0 - n, 4.0));
           
           // Drop visibility
           if (fract(aSeed.x * 123.456 + aSeed.z * 789.012) > spawnChance) {
@@ -513,7 +513,7 @@
           float nz = (driftZ + impactDriftOffset.y) * 0.01;
           // Use tImpact for the noise animation as well, so the cloud shape is completely frozen!
           float n = snoise(vec2(nx, nz) + tImpact * 0.1) * 0.5 + 0.5;
-          float spawnChance = max(0.015, pow(1.0 - n, 2.0));
+          float spawnChance = max(0.002, pow(1.0 - n, 4.0));
           
           vAlpha = 0.0;
           vec3 v = position;
@@ -573,6 +573,7 @@
     const clock          = new THREE.Clock();
     let frames           = 0;
     let lastFpsTime      = performance.now();
+    let currentParticleCount = CONFIG.rainCount;
 
     const handleResize = () => {
       const w = window.innerWidth;
@@ -633,7 +634,15 @@
       }
     });
 
+    let lastFrameTime = performance.now();
+
     const animate = () => {
+      requestAnimationFrame(animate);
+
+      const nowFrame = performance.now();
+      if (nowFrame - lastFrameTime < 16.0) return; // Cap max framerate to ~60 FPS
+      lastFrameTime = nowFrame;
+
       const dt   = Math.min(clock.getDelta(), 0.1) * CONFIG.speedMultiplier;
       const time = clock.getElapsedTime() * CONFIG.speedMultiplier;
 
@@ -653,11 +662,7 @@
       driftOffset.x -= Math.cos(windAngle) * CONFIG.sheetSpeed * dt * gustFactor;
       driftOffset.y -= Math.sin(windAngle) * CONFIG.sheetSpeed * dt * gustFactor;
 
-      // Camera Animation
-      camera.position.x = Math.sin(time * CONFIG.cameraDriftSpeed) * CONFIG.cameraDriftRadius;
-      camera.position.z = Math.cos(time * CONFIG.cameraDriftSpeed * 0.73) * CONFIG.cameraDriftRadius;
-      camera.rotation.y = Math.sin(time * CONFIG.cameraDriftSpeed * 0.45) * 0.15;
-      camera.rotation.x = (CONFIG.cameraTiltDeg * Math.PI / 180) + Math.sin(time * CONFIG.cameraDriftSpeed * 0.8) * 0.03;
+
 
       camera.updateMatrixWorld();
 
@@ -669,17 +674,32 @@
 
       composer.render();
       
-      if (showFps) {
-        frames++;
-        const now = performance.now();
-        if (now >= lastFpsTime + 1000) {
-          fpsEl.innerText = `FPS: ${Math.round((frames * 1000) / (now - lastFpsTime))}`;
-          frames = 0;
-          lastFpsTime = now;
+      frames++;
+      const now = performance.now();
+      if (now >= lastFpsTime + 1000) {
+        const fps = Math.round((frames * 1000) / (now - lastFpsTime));
+        if (showFps) {
+          fpsEl.innerText = `FPS: ${fps} | Particles: ${currentParticleCount.toLocaleString()}`;
         }
+        
+        // Dynamic Resolution / Particle Scaling
+        if (now > 4000) { // Wait 4 seconds for shader compilation and load jitter
+           if (fps < 30) {
+              // Too slow! Drop particle count by 20%
+              currentParticleCount = Math.max(1000000, Math.floor(currentParticleCount * 0.8));
+              rainGeom.instanceCount = currentParticleCount;
+              rippleGeom.instanceCount = currentParticleCount;
+           } else if (fps > 55 && currentParticleCount < CONFIG.rainCount) {
+              // Plenty of headroom, scale up by 5%
+              currentParticleCount = Math.min(CONFIG.rainCount, Math.floor(currentParticleCount * 1.05));
+              rainGeom.instanceCount = currentParticleCount;
+              rippleGeom.instanceCount = currentParticleCount;
+           }
+        }
+        
+        frames = 0;
+        lastFpsTime = now;
       }
-      
-      requestAnimationFrame(animate);
     };
 
     animate();
