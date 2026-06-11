@@ -27,6 +27,46 @@
       width: 100vw;
       height: 100vh;
     }
+    #fps {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: rgba(255, 255, 255, 0.7);
+      font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      font-weight: 100;
+      font-size: 16px;
+      z-index: 1000;
+      display: none;
+      pointer-events: none;
+    }
+    #controls {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      z-index: 1000;
+      color: rgba(255, 255, 255, 0.6);
+      font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      font-weight: 100;
+      font-size: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+      background: rgba(0, 0, 0, 0.4);
+      padding: 15px 20px;
+      border-radius: 8px;
+    }
+    .control-group {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .control-group label {
+      letter-spacing: 0.5px;
+    }
+    input[type=range] {
+      width: 150px;
+      accent-color: rgba(255, 255, 255, 0.6);
+    }
   </style>
   <script type="importmap">
     {
@@ -38,71 +78,135 @@
   </script>
 </head>
 <body>
+  <div id="fps">FPS: 0</div>
   <div id="error"></div>
   <script type="module">
     import * as THREE from 'three';
     import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
     import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-    import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
     import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+    import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
     // ============================================================
-    //  CONFIG — all tweakable values in one place
+    //  JS Simplex Noise 3D Implementation
+    // ============================================================
+    const grad3 = new Float32Array([
+        1,1,0, -1,1,0, 1,-1,0, -1,-1,0,
+        1,0,1, -1,0,1, 1,0,-1, -1,0,-1,
+        0,1,1, 0,-1,1, 0,1,-1, 0,-1,-1
+    ]);
+    const p = new Uint8Array(256);
+    for (let i=0; i<256; i++) p[i] = Math.floor(Math.random()*256);
+    const perm = new Uint8Array(512);
+    const permMod12 = new Uint8Array(512);
+    for (let i=0; i<512; i++) {
+        perm[i] = p[i & 255];
+        permMod12[i] = (perm[i] % 12) * 3;
+    }
+    const F3 = 1.0/3.0;
+    const G3 = 1.0/6.0;
+    function dot(g, x, y, z) {
+        return grad3[g] * x + grad3[g+1] * y + grad3[g+2] * z;
+    }
+    function simplex3(xin, yin, zin) {
+        let n0, n1, n2, n3;
+        let s = (xin+yin+zin)*F3;
+        let i = Math.floor(xin+s), j = Math.floor(yin+s), k = Math.floor(zin+s);
+        let t = (i+j+k)*G3;
+        let X0 = i-t, Y0 = j-t, Z0 = k-t;
+        let x0 = xin-X0, y0 = yin-Y0, z0 = zin-Z0;
+        let i1, j1, k1, i2, j2, k2;
+        if(x0>=y0) {
+            if(y0>=z0) { i1=1; j1=0; k1=0; i2=1; j2=1; k2=0; }
+            else if(x0>=z0) { i1=1; j1=0; k1=0; i2=1; j2=0; k2=1; }
+            else { i1=0; j1=0; k1=1; i2=1; j2=0; k2=1; }
+        } else {
+            if(y0<z0) { i1=0; j1=0; k1=1; i2=0; j2=1; k2=1; }
+            else if(x0<z0) { i1=0; j1=1; k1=0; i2=0; j2=1; k2=1; }
+            else { i1=0; j1=1; k1=0; i2=1; j2=1; k2=0; }
+        }
+        let x1 = x0 - i1 + G3, y1 = y0 - j1 + G3, z1 = z0 - k1 + G3;
+        let x2 = x0 - i2 + 2.0*G3, y2 = y0 - j2 + 2.0*G3, z2 = z0 - k2 + 2.0*G3;
+        let x3 = x0 - 1.0 + 3.0*G3, y3 = y0 - 1.0 + 3.0*G3, z3 = z0 - 1.0 + 3.0*G3;
+        let ii = i & 255, jj = j & 255, kk = k & 255;
+        let t0 = 0.6 - x0*x0 - y0*y0 - z0*z0;
+        if(t0<0) n0 = 0.0; else { t0 *= t0; n0 = t0 * t0 * dot(permMod12[ii+perm[jj+perm[kk]]], x0, y0, z0); }
+        let t1 = 0.6 - x1*x1 - y1*y1 - z1*z1;
+        if(t1<0) n1 = 0.0; else { t1 *= t1; n1 = t1 * t1 * dot(permMod12[ii+i1+perm[jj+j1+perm[kk+k1]]], x1, y1, z1); }
+        let t2 = 0.6 - x2*x2 - y2*y2 - z2*z2;
+        if(t2<0) n2 = 0.0; else { t2 *= t2; n2 = t2 * t2 * dot(permMod12[ii+i2+perm[jj+j2+perm[kk+k2]]], x2, y2, z2); }
+        let t3 = 0.6 - x3*x3 - y3*y3 - z3*z3;
+        if(t3<0) n3 = 0.0; else { t3 *= t3; n3 = t3 * t3 * dot(permMod12[ii+1+perm[jj+1+perm[kk+1]]], x3, y3, z3); }
+        return 32.0*(n0 + n1 + n2 + n3);
+    }
+
+    // ============================================================
+    //  CONFIG — tweakable values
     // ============================================================
     const CONFIG = {
 
       // --- Scene ---
-      fogNear:               50,      // fog start distance
-      fogFar:                3000,    // fog end distance
+      fogNear:               50,      
+      fogFar:                1500,    
 
       // --- Camera ---
-      focalLength:           85,      // mm — lower = wider angle
-      cameraHeight:          20.0,    // metres above water
-      cameraTiltDeg:         -10,     // degrees; negative = looking down
-
-      // --- Rain ---
-      rainCount:             500000,  // number of raindrop particles
-      rainSpawnWidth:        1200,    // total X spread of spawn area
-      rainSpawnDepth:        1200,    // total Z depth of spawn area
-      rainFallSpeedMin:      15.0,    // units/s minimum fall speed
-      rainFallSpeedMax:      50.0,    // units/s maximum fall speed
-      rainDriftBias:         6.0,     // ±clump drift bias (each sheet gets its own velocity)
-      rainWindX:             6.0,     // wind push multiplier on X axis
-      rainWindZ:             5.0,     // wind push multiplier on Z axis
-      rainSheetThreshold:   -0.2,     // sine threshold for sheet density (-1=dense, 1=sparse)
-      rainSpawnHeightMin:    100,     // units above surface to respawn drops
-      rainSpawnHeightRange:  150,      // randomised extra height on respawn
-
-      // --- Wind ---
-      speedMultiplier:       0.95,    // global animation speed (1.0 = full speed)
-      gustMin:               5.0,     // minimum gust strength
-      gustRange:             10.0,    // random extra gust strength
-      gustIntervalMin:       1.0,     // minimum seconds between gusts
-      gustIntervalRange:     3.0,     // random extra seconds between gusts
-      gustDecay:             2.5,     // how quickly gusts fade back to baseline
-
-      // --- Ripples ---
-      rippleCount:           500000,  // instanced mesh pool size
-      rippleMaxScale:        1.5,     // maximum ripple diameter at full expansion
-      rippleSizeVariance:    0.35,    // up to this fraction smaller (0.35 = up to 35% smaller)
-      rippleLifeMin:         0.8,     // minimum ripple lifetime in seconds
-      rippleLifeRange:       0.6,     // random extra lifetime in seconds
-
-      // --- Splash Discs (afterimage when a ripple completes) ---
-      splashCount:           500000,  // instanced mesh pool size
-      splashOpacity:         0.03,    // base opacity of the filled disc (0–1)
-      splashLifeMultiplier:  3.0,     // how many times longer splash lives vs its parent ripple
+      focalLength:           40,      
+      cameraHeight:          20.0,    
+      cameraTiltDeg:         -13,     
+      cameraZoom:            1.0,
+      cameraDriftSpeed:      0.04875, // how fast the camera wanders
+      cameraDriftRadius:     80.0,    // how far it wanders from origin
 
       // --- Depth of Field ---
-      dofFocus:              75.0,    // focus distance
-      dofAperture:           0.00005,  // depth of field strength (small is strong)
-      dofMaxBlur:            0.001,   // blur radius
+      focusDist:             100.0,
+      aperture:              25.0,    // Multiplier for the circle of confusion
 
-      // --- Bloom (Unreal Glow) ---
-      bloomStrength:         0.0,     // strength of the glow
-      bloomRadius:           0.0,     // glow radius
-      bloomThreshold:        0.0,     // lower makes darker areas glow
+      // --- HDR Bloom ---
+      bloomStrength:         0.0375,
+      bloomRadius:           0.5,
+      bloomThreshold:        1.0,     // pixels brighter than 1.0 will bloom
 
+      // --- Perlin Emitter (Invisible) ---
+      noiseScale:            0.01,   // scale of rain blobs
+      noiseMorphSpeed:       0.2,     // how fast blobs change shape
+      sheetSpeed:            120.0,   // how fast the wind pushes the emitter blobs
+      noiseContrast:         8.0,     // exponential curve to tighten the dense areas (higher = more compact)
+      minRainChance:         0.015,   // base probability for sparse rain everywhere
+
+      // --- Rain ---
+      rainCount:             3000000,  
+      rainSpawnWidth:        2400,    
+      rainSpawnDepth:        4000,    
+      rainFallSpeedMin:      50.0,    
+      rainFallSpeedMax:      90.0,    
+      rainDriftBias:         0.5,     
+      rainWindX:             17.5,     
+      rainWindZ:             17.5,     
+      rainSpawnHeightMin:    30,       
+      rainSpawnHeightRange:  20,       
+      rainStreakMin:         0.25,    
+      rainStreakMax:         0.55,    
+
+      // --- Wind ---
+      speedMultiplier:       0.475,   
+      windRotateSpeed:       0.018,   
+      gustMin:               1.2,     
+      gustRange:             2.4,     
+      gustIntervalMin:       2.5,     
+      gustIntervalRange:     4.0,     
+      gustDecay:             0.5,     
+
+      // --- Ripples ---
+      rippleCount:           3000000,  
+      rippleMaxScale:        2.25,     
+      rippleSizeVariance:    0.35,    
+      rippleLifeMin:         0.8,     
+      rippleLifeRange:       0.6,     
+
+      // --- Ocean Swell ---
+      swellAmplitude:        0.15,
+      swellScale:            0.02,
+      swellSpeed:            1.2,
     };
     // ============================================================
 
@@ -113,397 +217,473 @@
       scene.fog = new THREE.Fog(0x000000, CONFIG.fogNear, CONFIG.fogFar);
 
       // --- Camera ---
-      const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2000);
+      const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 3000);
       camera.setFocalLength(CONFIG.focalLength);
+      camera.zoom = CONFIG.cameraZoom;
+      camera.updateProjectionMatrix();
       camera.position.set(0, CONFIG.cameraHeight, 0);
       camera.rotation.set(CONFIG.cameraTiltDeg * Math.PI / 180, 0, 0);
 
-      const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.toneMapping = THREE.ReinhardToneMapping;
       document.body.appendChild(renderer.domElement);
 
-      // --- Post-Processing (Bloom + Depth of Field) ---
-      const composer = new EffectComposer(renderer);
-      const renderPass = new RenderPass(scene, camera);
-      composer.addPass(renderPass);
-
+      const renderScene = new RenderPass(scene, camera);
       const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), CONFIG.bloomStrength, CONFIG.bloomRadius, CONFIG.bloomThreshold);
+      const outputPass = new OutputPass();
+
+      const composer = new EffectComposer(renderer);
+      composer.addPass(renderScene);
       composer.addPass(bloomPass);
+      composer.addPass(outputPass);
 
-      const bokehPass = new BokehPass(scene, camera, {
-        focus: CONFIG.dofFocus,
-        aperture: CONFIG.dofAperture,
-        maxblur: CONFIG.dofMaxBlur,
-        width: window.innerWidth,
-        height: window.innerHeight
-      });
-      composer.addPass(bokehPass);
+      
+    // ============================================================
+    //  GPU Physics Engine (GLSL)
+    // ============================================================
+    const GLSL_COMMON = `
+      vec3 permute(vec3 x) { return mod(((x*34.0)+1.0)*x, 289.0); }
+      float snoise(vec2 v){
+        const vec4 C = vec4(0.211324865405187, 0.366025403784439, -0.577350269189626, 0.024390243902439);
+        vec2 i  = floor(v + dot(v, C.yy) );
+        vec2 x0 = v -   i + dot(i, C.xx);
+        vec2 i1; i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+        vec4 x12 = x0.xyxy + C.xxzz; x12.xy -= i1;
+        i = mod(i, 289.0);
+        vec3 p = permute( permute( i.y + vec3(0.0, i1.y, 1.0 )) + i.x + vec3(0.0, i1.x, 1.0 ));
+        vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
+        m = m*m; m = m*m;
+        vec3 x = 2.0 * fract(p * C.www) - 1.0;
+        vec3 h = abs(x) - 0.5;
+        vec3 ox = floor(x + 0.5);
+        vec3 a0 = x - ox;
+        m *= 1.79284291400159 - 0.85373472095314 * ( a0*a0 + h*h );
+        vec3 g;
+        g.x  = a0.x  * x0.x  + h.x  * x0.y;
+        g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+        return 130.0 * dot(m, g);
+      }
+      float getSwellY(float x, float z, float t) {
+        float s = 0.02; // CONFIG.swellScale
+        float tSpeed = t * 1.2; // CONFIG.swellSpeed
+        float wave1 = sin(x * s + tSpeed) * cos(z * s + tSpeed);
+        float wave2 = sin(x * s * 1.3 - tSpeed * 1.2 + z * s * 0.8);
+        float wave3 = cos(z * s * 1.7 + tSpeed * 0.8 - x * s * 0.5);
+        return (wave1 + wave2 * 0.5 + wave3 * 0.25) * 0.15; // CONFIG.swellAmplitude
+      }
+    `;
 
-      // --- Rain ---
-      const RAIN_COUNT = CONFIG.rainCount;
-      const rainGeom   = new THREE.BufferGeometry();
-      const rainPos    = new Float32Array(RAIN_COUNT * 3);
-      const rainSpeeds = new Float32Array(RAIN_COUNT);
-      // Per-drop persistent drift bias — gives each clump its own speed & direction variance
-      const rainDriftX = new Float32Array(RAIN_COUNT);
-      const rainDriftZ = new Float32Array(RAIN_COUNT);
+    const RAIN_COUNT = CONFIG.rainCount;
+    const RIPPLE_COUNT = CONFIG.rippleCount;
 
-      for (let i = 0; i < RAIN_COUNT; i++) {
-        rainPos[i * 3]     = (Math.random() - 0.5) * CONFIG.rainSpawnWidth;
-        rainPos[i * 3 + 1] = Math.random() * 100;
-        rainPos[i * 3 + 2] = 50 - Math.random() * CONFIG.rainSpawnDepth;
-        rainSpeeds[i] = CONFIG.rainFallSpeedMin + Math.random() * (CONFIG.rainFallSpeedMax - CONFIG.rainFallSpeedMin);
-        rainDriftX[i] = (Math.random() - 0.5) * CONFIG.rainDriftBias;
-        rainDriftZ[i] = (Math.random() - 0.5) * CONFIG.rainDriftBias;
+    // We reuse the exact same random arrays for Rain and Ripples so they match mathematically
+    const aSeed = new Float32Array(RAIN_COUNT * 3);
+    const aPhysics = new Float32Array(RAIN_COUNT * 4); // x: speed, y: streakLen, z: thickness, w: alpha
+
+    const fgCount = Math.floor(RAIN_COUNT * 0.08);
+    const mgCount = Math.floor(RAIN_COUNT * 0.32);
+    const bgCount = RAIN_COUNT - fgCount - mgCount;
+
+    for (let i = 0; i < RAIN_COUNT; i++) {
+      aSeed[i * 3 + 0] = (Math.random() - 0.5) * CONFIG.rainSpawnWidth;
+      aSeed[i * 3 + 1] = Math.random() * 100000.0; // Random time offset for continuous fall
+      aSeed[i * 3 + 2] = 50 - Math.random() * CONFIG.rainSpawnDepth;
+      
+      if (i < bgCount) {
+        aPhysics[i * 4 + 0] = 28 + Math.random() * 14; // speed
+        aPhysics[i * 4 + 1] = 0.1 + Math.random() * 0.05; // streak
+        aPhysics[i * 4 + 2] = 0.005; // thickness
+        aPhysics[i * 4 + 3] = 0.4; // alpha
+      } else if (i < bgCount + mgCount) {
+        aPhysics[i * 4 + 0] = 49 + Math.random() * 21; // speed
+        aPhysics[i * 4 + 1] = 0.2 + Math.random() * 0.1; // streak
+        aPhysics[i * 4 + 2] = 0.01;
+        aPhysics[i * 4 + 3] = 0.7;
+      } else {
+        aPhysics[i * 4 + 0] = 91 + Math.random() * 35; // speed
+        aPhysics[i * 4 + 1] = 0.4 + Math.random() * 0.2; // streak
+        aPhysics[i * 4 + 2] = 0.02;
+        aPhysics[i * 4 + 3] = 1.0;
+      }
+    }
+
+    const sharedUniforms = {
+      uTime: { value: 0 },
+      uGust: { value: 1.0 },
+      uWindAngle: { value: 0 },
+      uDriftOffset: { value: new THREE.Vector2(0, 0) },
+      maxDist: { value: CONFIG.rainSpawnDepth },
+      rainSpawnHeightMin: { value: CONFIG.rainSpawnHeightMin },
+      rainSpawnHeightRange: { value: CONFIG.rainSpawnHeightRange },
+      uSheetSpeed: { value: CONFIG.sheetSpeed }
+    };
+
+    // --- Rain Mesh (GPU) ---
+    const rainGeom = new THREE.InstancedBufferGeometry();
+    const baseCyl = new THREE.CylinderGeometry(0.5, 0.5, 1, 3);
+    baseCyl.translate(0, -0.5, 0);
+    rainGeom.index = baseCyl.index;
+    rainGeom.attributes.position = baseCyl.attributes.position;
+    rainGeom.attributes.uv = baseCyl.attributes.uv;
+
+    rainGeom.setAttribute('aSeed', new THREE.InstancedBufferAttribute(aSeed, 3));
+    rainGeom.setAttribute('aPhysics', new THREE.InstancedBufferAttribute(aPhysics, 4));
+
+    const rainMat = new THREE.ShaderMaterial({
+      uniforms: Object.assign({}, sharedUniforms, {
+        color: { value: new THREE.Color(3.0, 3.0, 3.0) },
+        nearOpacity: { value: 0.90 },
+        farOpacity: { value: 0.00 },
+        focusDist: { value: CONFIG.focusDist },
+        aperture: { value: CONFIG.aperture }
+      }),
+      vertexShader: `
+        ${GLSL_COMMON}
+        attribute vec3 aSeed;
+        attribute vec4 aPhysics;
+        
+        uniform float uTime;
+        uniform float uGust;
+        uniform float uWindAngle;
+        uniform vec2 uDriftOffset;
+        uniform float focusDist;
+        uniform float aperture;
+        uniform float rainSpawnHeightMin;
+        uniform float rainSpawnHeightRange;
+        
+        varying float vDist;
+        varying float vBaseAlpha;
+        varying float vBlurScale;
+        
+        void main() {
+          float speed = aPhysics.x;
+          float streak = aPhysics.y;
+          float thickness = aPhysics.z;
+          vBaseAlpha = aPhysics.w;
+          
+          float fallDist = uTime * speed + aSeed.y;
+          float spawnRange = rainSpawnHeightMin + rainSpawnHeightRange;
+          
+          float globalCosA = cos(uWindAngle);
+          float globalSinA = sin(uWindAngle);
+          
+          // Replicate getWindFast
+          float xy05 = aSeed.x * 0.05;
+          float z05  = aSeed.z * 0.05;
+          float t1 = uTime * 0.4;
+          float wx = sin(xy05 + t1) + cos(z05 + t1*1.1);
+          float wz = cos(xy05 - t1) + sin(z05 + t1*0.7);
+          float windDirX = (globalCosA * (wx+0.5) - globalSinA * (wz-0.2)) * uGust;
+          float windDirZ = (globalSinA * (wx+0.5) + globalCosA * (wz-0.2)) * uGust;
+          
+          // Simple drift integration approximation
+          float driftX = aSeed.x + windDirX * uTime * 0.5; 
+          float driftZ = aSeed.z + windDirZ * uTime * 0.5;
+          
+          float swellY = getSwellY(driftX, driftZ, uTime);
+          // Modulo wrap around
+          float y_fall = spawnRange - mod(fallDist, spawnRange) + swellY - streak;
+
+          // Density map
+          float nx = (driftX + uDriftOffset.x) * 0.01;
+          float nz = (driftZ + uDriftOffset.y) * 0.01;
+          float n = snoise(vec2(nx, nz) + uTime * 0.1) * 0.5 + 0.5;
+          float spawnChance = max(0.015, pow(1.0 - n, 2.0));
+          
+          // Drop visibility
+          if (fract(aSeed.x * 123.456 + aSeed.z * 789.012) > spawnChance) {
+            thickness = 0.0;
+          }
+          
+          vec3 pos = vec3(driftX, y_fall, driftZ);
+          
+          vec3 velocity = normalize(vec3(windDirX * 17.5, -speed, windDirZ * 17.5));
+          vec3 up = vec3(0.0, 1.0, 0.0);
+          vec3 axis = cross(up, velocity);
+          float angle = acos(dot(up, velocity));
+          
+          // Rotate drop to face velocity
+          vec3 v = position;
+          v.y *= streak;
+          v.x *= thickness;
+          v.z *= thickness;
+          v = v * cos(angle) + cross(axis, v) * sin(angle) + axis * dot(axis, v) * (1.0 - cos(angle));
+          v += pos;
+          
+          vec4 worldCenter = modelMatrix * vec4(pos, 1.0);
+          vec4 viewCenter = viewMatrix * worldCenter;
+          float centerDist = -viewCenter.z;
+          
+          float coc = abs(centerDist - focusDist) * (aperture / 1000.0);
+          vBlurScale = 1.0 + coc * 10.0;
+          
+          vec4 mvPosition = viewMatrix * modelMatrix * vec4(v, 1.0);
+          vDist = -mvPosition.z;
+          gl_Position = projectionMatrix * mvPosition;
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 color;
+        uniform float nearOpacity;
+        uniform float farOpacity;
+        uniform float maxDist;
+        
+        varying float vDist;
+        varying float vBaseAlpha;
+        varying float vBlurScale;
+        
+        void main() {
+          float t = clamp(vDist / maxDist, 0.0, 1.0);
+          float op = mix(nearOpacity, farOpacity, t) * vBaseAlpha;
+          op = op / (vBlurScale * 0.8);
+          gl_FragColor = vec4(color, op);
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    });
+
+    const rainMesh = new THREE.Mesh(rainGeom, rainMat);
+    rainMesh.frustumCulled = false;
+    scene.add(rainMesh);
+
+    // --- Ripple Mesh (GPU) ---
+    const rippleGeom = new THREE.InstancedBufferGeometry();
+    const planeGeom = new THREE.PlaneGeometry(1, 1);
+    planeGeom.rotateX(-Math.PI / 2);
+    rippleGeom.index = planeGeom.index;
+    rippleGeom.attributes.position = planeGeom.attributes.position;
+    rippleGeom.attributes.uv = planeGeom.attributes.uv;
+
+    rippleGeom.setAttribute('aSeed', new THREE.InstancedBufferAttribute(aSeed, 3));
+    rippleGeom.setAttribute('aPhysics', new THREE.InstancedBufferAttribute(aPhysics, 4));
+
+    const rippleMat = new THREE.ShaderMaterial({
+      uniforms: Object.assign({}, sharedUniforms),
+      extensions: { derivatives: true },
+      vertexShader: `
+        ${GLSL_COMMON}
+        attribute vec3 aSeed;
+        attribute vec4 aPhysics;
+        
+        uniform float uTime;
+        uniform float uGust;
+        uniform vec2 uDriftOffset;
+        uniform float rainSpawnHeightMin;
+        uniform float rainSpawnHeightRange;
+        uniform float uSheetSpeed;
+        uniform float uWindAngle;
+        
+        varying vec2 vUv;
+        varying float vAlpha;
+        varying float vDist;
+        
+        void main() {
+          vUv = uv;
+          float speed = aPhysics.x;
+          float spawnRange = rainSpawnHeightMin + rainSpawnHeightRange;
+          float fallDist = uTime * speed + aSeed.y;
+          
+          // mod(fallDist, spawnRange) goes 0 -> spawnRange
+          // When it reaches spawnRange, it hits the ground.
+          // Distance fallen SINCE the impact:
+          float distSinceImpact = mod(fallDist, spawnRange);
+          float timeSinceImpact = distSinceImpact / speed;
+          
+          // Frozen time of impact for constant noise sampling
+          float tImpact = uTime - timeSinceImpact;
+          
+          float maxAge = 0.8 + fract(aSeed.x * 456.789)*0.6; 
+          float progress = timeSinceImpact / maxAge;
+          
+          float driftX = aSeed.x; // Keep ripple static where it hit
+          float driftZ = aSeed.z;
+          
+          float swellY = getSwellY(driftX, driftZ, uTime);
+          vec3 pos = vec3(driftX, swellY + 0.01, driftZ);
+          
+          // Reconstruct the exact drift offset at the moment of impact so the noise density never changes
+          vec2 windVec = vec2(cos(uWindAngle), sin(uWindAngle)) * uSheetSpeed * uGust;
+          vec2 impactDriftOffset = uDriftOffset + windVec * timeSinceImpact;
+          
+          float nx = (driftX + impactDriftOffset.x) * 0.01;
+          float nz = (driftZ + impactDriftOffset.y) * 0.01;
+          // Use tImpact for the noise animation as well, so the cloud shape is completely frozen!
+          float n = snoise(vec2(nx, nz) + tImpact * 0.1) * 0.5 + 0.5;
+          float spawnChance = max(0.015, pow(1.0 - n, 2.0));
+          
+          vAlpha = 0.0;
+          vec3 v = position;
+          
+          // Only show ripple if it spawned inside a cloud, and is within its lifespan
+          if (fract(aSeed.x * 123.456 + aSeed.z * 789.012) <= spawnChance && progress >= 0.0 && progress <= 1.0) {
+            float easeExp = 1.0 - pow(1.0 - progress, 3.0);
+            float maxScale = 2.25 * (1.0 - fract(aSeed.y * 321.654)*0.35);
+            float s = easeExp * maxScale;
+            v *= s;
+            vAlpha = max(0.0, 1.0 - easeExp);
+          } else {
+            v *= 0.0; // Hidden
+          }
+          
+          vec4 mvPosition = viewMatrix * modelMatrix * vec4(v + pos, 1.0);
+          vDist = -mvPosition.z;
+          gl_Position = projectionMatrix * mvPosition;
+        }
+      `,
+      fragmentShader: `
+        uniform float maxDist;
+        varying vec2 vUv;
+        varying float vAlpha;
+        varying float vDist;
+        void main() {
+          float dist = distance(vUv, vec2(0.5));
+          float targetR = 0.4;
+          float d = abs(dist - targetR);
+          vec2 dUv = vec2(dFdx(dist), dFdy(dist));
+          float fw = length(dUv);
+          float alpha = 1.0 - smoothstep(0.0, 1.0 * fw, d);
+          
+          float t = clamp(vDist / maxDist, 0.0, 1.0);
+          float depthAlpha = mix(1.0, 0.0, t);
+          float finalAlpha = alpha * vAlpha * depthAlpha;
+          
+          if (finalAlpha < 0.02) discard;
+          gl_FragColor = vec4(2.0, 2.0, 2.0, finalAlpha);
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    });
+
+    const rippleMesh = new THREE.Mesh(rippleGeom, rippleMat);
+    rippleMesh.frustumCulled = false;
+    scene.add(rippleMesh);
+
+    // --- Flow Field Setup ---
+    let gustFactor       = 1.0;
+    let targetGustFactor = 1.0;
+    let nextGustTime     = 2.0;
+    let windAngle        = 0.0;
+    let driftOffset      = new THREE.Vector2(0, 0);
+    const clock          = new THREE.Clock();
+    let frames           = 0;
+    let lastFpsTime      = performance.now();
+
+    const handleResize = () => {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const isPortrait = h > w;
+      
+      if (isPortrait) {
+        CONFIG.rainSpawnDepth = 8000;
+        CONFIG.rainSpawnWidth = 4000;
+        CONFIG.fogFar = 7000;
+        // Shift the physical lens offset to push the horizon off the top of the screen
+        camera.setViewOffset(w, h, 0, h * 0.35, w, h);
+      } else {
+        CONFIG.rainSpawnDepth = 4000;
+        CONFIG.rainSpawnWidth = 2400;
+        CONFIG.fogFar = 3000;
+        camera.clearViewOffset();
+      }
+      
+      scene.fog.far = CONFIG.fogFar;
+      if (typeof rainMat !== 'undefined' && rainMat.uniforms) {
+        rainMat.uniforms.maxDist.value = CONFIG.rainSpawnDepth;
       }
 
-      rainGeom.setAttribute('position', new THREE.BufferAttribute(rainPos, 3));
+      camera.aspect = w / h;
+      camera.position.y = CONFIG.cameraHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+      composer.setSize(w, h);
 
-      const rainMat = new THREE.ShaderMaterial({
-        uniforms: { color: { value: new THREE.Color(0xffffff) } },
-        vertexShader: `
-          void main() {
-            vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-            gl_PointSize = 4.0;
-            gl_Position = projectionMatrix * mvPosition;
-          }
-        `,
-        fragmentShader: `
-          uniform vec3 color;
-          void main() {
-            if (gl_PointCoord.x < 0.25 || gl_PointCoord.x > 0.75) discard;
-            gl_FragColor = vec4(color, 1.0);
-          }
-        `,
-        transparent: true,
-        depthWrite: false
-      });
-
-      const rainSystem = new THREE.Points(rainGeom, rainMat);
-      rainSystem.frustumCulled = false;
-      rainSystem.visible = false;
-      scene.add(rainSystem);
-
-      // --- Ripples ---
-      const RIPPLE_COUNT = CONFIG.rippleCount;
-      const rippleGeom   = new THREE.PlaneGeometry(1, 1);
-      rippleGeom.rotateX(-Math.PI / 2);
-
-      const rippleMat = new THREE.ShaderMaterial({
-        uniforms: { color: { value: new THREE.Color(0xffffff) } },
-        extensions: { derivatives: true },
-        vertexShader: `
-          varying vec2 vUv;
-          varying float vAlpha;
-          void main() {
-            vUv = uv;
-            #ifdef USE_INSTANCING_COLOR
-              vAlpha = instanceColor.r;
-            #else
-              vAlpha = 1.0;
-            #endif
-            #ifdef USE_INSTANCING
-              vec4 mvPosition = modelViewMatrix * instanceMatrix * vec4(position, 1.0);
-            #else
-              vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-            #endif
-            gl_Position = projectionMatrix * mvPosition;
-          }
-        `,
-        fragmentShader: `
-          uniform vec3 color;
-          varying vec2 vUv;
-          varying float vAlpha;
-          void main() {
-            float dist = distance(vUv, vec2(0.5));
-            float targetR = 0.4;
-            float d = abs(dist - targetR);
-            vec2 dUv = vec2(dFdx(dist), dFdy(dist));
-            float fw = length(dUv);
-            float alpha = 1.0 - smoothstep(0.5 * fw, 2.5 * fw, d);
-            if (alpha < 0.02 || vAlpha < 0.02) discard;
-            gl_FragColor = vec4(1.0, 1.0, 1.0, alpha * vAlpha);
-          }
-        `,
-        transparent: true,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending
-      });
-
-      const rippleMesh = new THREE.InstancedMesh(rippleGeom, rippleMat, RIPPLE_COUNT);
-      rippleMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      rippleMesh.frustumCulled = false;
-
-      const dummyMatrix = new THREE.Matrix4();
-      const dummyColor  = new THREE.Color(0, 0, 0);
-      for (let i = 0; i < RIPPLE_COUNT; i++) {
-        dummyMatrix.setPosition(0, -100, 0);
-        rippleMesh.setMatrixAt(i, dummyMatrix);
-        rippleMesh.setColorAt(i, dummyColor);
+      const heightSlider = document.getElementById('height-slider');
+      const heightVal = document.getElementById('height-val');
+      const angleSlider = document.getElementById('angle-slider');
+      const angleVal = document.getElementById('angle-val');
+      if (heightSlider && angleSlider) {
+        heightSlider.value = CONFIG.cameraHeight;
+        heightVal.innerText = CONFIG.cameraHeight;
+        angleSlider.value = CONFIG.cameraTiltDeg;
+        angleVal.innerText = CONFIG.cameraTiltDeg;
       }
-      rippleMesh.instanceMatrix.needsUpdate = true;
-      if (rippleMesh.instanceColor) rippleMesh.instanceColor.needsUpdate = true;
-      scene.add(rippleMesh);
+    };
 
-      // --- Splash Discs (filled circle afterimage when ripple completes) ---
-      const SPLASH_COUNT = CONFIG.splashCount;
-      const splashMat = new THREE.ShaderMaterial({
-        extensions: { derivatives: true },
-        vertexShader: `
-          varying vec2 vUv;
-          varying float vAlpha;
-          void main() {
-            vUv = uv;
-            #ifdef USE_INSTANCING_COLOR
-              vAlpha = instanceColor.r;
-            #else
-              vAlpha = 1.0;
-            #endif
-            #ifdef USE_INSTANCING
-              vec4 mvPosition = modelViewMatrix * instanceMatrix * vec4(position, 1.0);
-            #else
-              vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-            #endif
-            gl_Position = projectionMatrix * mvPosition;
-          }
-        `,
-        fragmentShader: `
-          varying vec2 vUv;
-          varying float vAlpha;
-          void main() {
-            float dist = distance(vUv, vec2(0.5));
-            if (dist > 0.48) discard;
-            if (vAlpha < 0.001) discard;
-            gl_FragColor = vec4(1.0, 1.0, 1.0, ${CONFIG.splashOpacity.toFixed(3)} * vAlpha);
-          }
-        `,
-        transparent: true,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending
-      });
+    window.addEventListener('resize', handleResize);
+    handleResize(); // Call once to initialize orientation perfectly
 
-      const splashGeom = new THREE.PlaneGeometry(1, 1);
-      splashGeom.rotateX(-Math.PI / 2);
-      const splashMesh = new THREE.InstancedMesh(splashGeom, splashMat, SPLASH_COUNT);
-      splashMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      splashMesh.frustumCulled = false;
+    // Toggle rain visibility on click
+    renderer.domElement.addEventListener('click', () => {
+      rainMesh.visible = !rainMesh.visible;
+    });
 
-      for (let i = 0; i < SPLASH_COUNT; i++) {
-        dummyMatrix.setPosition(0, -100, 0);
-        splashMesh.setMatrixAt(i, dummyMatrix);
-        splashMesh.setColorAt(i, new THREE.Color(0, 0, 0));
+    const fpsEl = document.getElementById('fps');
+    let showFps = false;
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'f' || e.key === 'F') {
+        showFps = !showFps;
+        fpsEl.style.display = showFps ? 'block' : 'none';
       }
-      splashMesh.instanceMatrix.needsUpdate = true;
-      if (splashMesh.instanceColor) splashMesh.instanceColor.needsUpdate = true;
-      scene.add(splashMesh);
+    });
 
-      // --- Ripple pool (Structure-of-Arrays — Float32Array for cache efficiency) ---
-      const rippleX        = new Float32Array(RIPPLE_COUNT);
-      const rippleZ        = new Float32Array(RIPPLE_COUNT);
-      const rippleAge      = new Float32Array(RIPPLE_COUNT);
-      const rippleMaxAge   = new Float32Array(RIPPLE_COUNT);
-      const rippleMaxScale = new Float32Array(RIPPLE_COUNT);
-      // active state is tracked by activeRippleIndices Set — no separate array needed
+    const animate = () => {
+      const dt   = Math.min(clock.getDelta(), 0.1) * CONFIG.speedMultiplier;
+      const time = clock.getElapsedTime() * CONFIG.speedMultiplier;
 
-      // --- Splash pool (Structure-of-Arrays) ---
-      const splashX      = new Float32Array(SPLASH_COUNT);
-      const splashZ      = new Float32Array(SPLASH_COUNT);
-      const splashAge    = new Float32Array(SPLASH_COUNT);
-      const splashMaxAge = new Float32Array(SPLASH_COUNT);
-      const splashScale  = new Float32Array(SPLASH_COUNT);
+      windAngle += CONFIG.windRotateSpeed * dt;
 
-      let rippleIndex = 0;
-      const activeRippleIndices = new Set();
-
-      let splashIndex = 0;
-      const activeSplashIndices = new Set();
-
-      const spawnSplash = (x, z, scale, ripMaxAge) => {
-        const idx = splashIndex;
-        splashX[idx]      = x;
-        splashZ[idx]      = z;
-        splashAge[idx]    = 0;
-        splashMaxAge[idx] = ripMaxAge * CONFIG.splashLifeMultiplier;
-        splashScale[idx]  = scale;
-        activeSplashIndices.add(idx);
-        splashIndex = (splashIndex + 1) % SPLASH_COUNT;
-      };
-
-      const spawnRipple = (x, z) => {
-        const idx = rippleIndex;
-        rippleX[idx]        = x;
-        rippleZ[idx]        = z;
-        rippleAge[idx]      = 0;
-        rippleMaxAge[idx]   = CONFIG.rippleLifeMin + Math.random() * CONFIG.rippleLifeRange;
-        rippleMaxScale[idx] = CONFIG.rippleMaxScale * (1.0 - Math.random() * CONFIG.rippleSizeVariance);
-        activeRippleIndices.add(idx);
-        rippleIndex = (rippleIndex + 1) % RIPPLE_COUNT;
-      };
-
-      // --- Wind Flow Field ---
-      let gustFactor   = 1.0;
-      let nextGustTime = 2.0;
-
-      const getWind = (x, y, z, time) => {
-        const t  = time * 0.4;
-        const wx = Math.sin(x * 0.05 + y * 0.05 + t) + Math.cos(z * 0.05 + t * 1.1);
-        const wz = Math.cos(x * 0.05 + y * 0.05 - t) + Math.sin(z * 0.05 + t * 0.7);
-        return { x: (wx + 0.5) * gustFactor, z: (wz - 0.2) * gustFactor };
-      };
-
-      const handleResize = () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        composer.setSize(window.innerWidth, window.innerHeight);
-      };
-      window.addEventListener('resize', handleResize);
-
-      // Toggle rain visibility on click / tap
-      renderer.domElement.addEventListener('click', () => {
-        rainSystem.visible = !rainSystem.visible;
-      });
-
-      // --- Animation Loop ---
-      const clock          = new THREE.Clock();
-      const ripplePos      = new THREE.Vector3();
-      const rippleScaleVec = new THREE.Vector3();
-      const rippleQuat     = new THREE.Quaternion();
-      const splashPos      = new THREE.Vector3();
-      const splashScaleVec = new THREE.Vector3();
-
-      // Hoist constants that never change (idea 3)
-      const halfW = CONFIG.rainSpawnWidth / 2;
-      const halfD = CONFIG.rainSpawnDepth / 2;
-
-      // Frame counter for splash throttle (idea 8)
-      let frameCount = 0;
-
-      const animate = () => {
-        const dt   = Math.min(clock.getDelta(), 0.1) * CONFIG.speedMultiplier;
-        const time = clock.getElapsedTime() * CONFIG.speedMultiplier;
-
-        frameCount++;
-        const updateSplashes = (frameCount % 3 === 0); // idea 8: throttle splash to every 3rd frame
-
-        // Wind gusts
-        if (time > nextGustTime) {
-          gustFactor   = CONFIG.gustMin + Math.random() * CONFIG.gustRange;
-          nextGustTime = time + CONFIG.gustIntervalMin + Math.random() * CONFIG.gustIntervalRange;
+      if (time > nextGustTime) {
+        if (targetGustFactor === 1.0) {
+           targetGustFactor = CONFIG.gustMin + Math.random() * CONFIG.gustRange;
+           nextGustTime = time + 1.0 + Math.random() * 2.0;
+        } else {
+           targetGustFactor = 1.0;
+           nextGustTime = time + CONFIG.gustIntervalMin + Math.random() * CONFIG.gustIntervalRange;
         }
-        gustFactor += (1.0 - gustFactor) * CONFIG.gustDecay * dt;
+      }
+      gustFactor += (targetGustFactor - gustFactor) * CONFIG.gustDecay * dt;
 
-        // --- Rain physics ---
-        const posAttr = rainGeom.attributes.position;
-        const posArr  = posAttr.array;
+      driftOffset.x -= Math.cos(windAngle) * CONFIG.sheetSpeed * dt * gustFactor;
+      driftOffset.y -= Math.sin(windAngle) * CONFIG.sheetSpeed * dt * gustFactor;
 
-        for (let i = 0; i < RAIN_COUNT; i++) {
-          let x = posArr[i * 3];
-          let y = posArr[i * 3 + 1];
-          let z = posArr[i * 3 + 2];
+      // Camera Animation
+      camera.position.x = Math.sin(time * CONFIG.cameraDriftSpeed) * CONFIG.cameraDriftRadius;
+      camera.position.z = Math.cos(time * CONFIG.cameraDriftSpeed * 0.73) * CONFIG.cameraDriftRadius;
+      camera.rotation.y = Math.sin(time * CONFIG.cameraDriftSpeed * 0.45) * 0.15;
+      camera.rotation.x = (CONFIG.cameraTiltDeg * Math.PI / 180) + Math.sin(time * CONFIG.cameraDriftSpeed * 0.8) * 0.03;
 
-          const wind = getWind(x, y, z, time);
-          x += (wind.x + rainDriftX[i]) * CONFIG.rainWindX * dt;
-          z += (wind.z + rainDriftZ[i]) * CONFIG.rainWindZ * dt;
-          y -= rainSpeeds[i] * dt * (1.0 + gustFactor * 0.1);
+      camera.updateMatrixWorld();
 
-          if (y < 0) {
-            if (x > -halfW && x < halfW && z > -(halfD + 200) && z < 50) {
-              spawnRipple(x, z);
-            }
-            y = CONFIG.rainSpawnHeightMin + Math.random() * CONFIG.rainSpawnHeightRange;
-            let newX, newZ;
-            for (let tries = 0; tries < 4; tries++) {
-              newX = (Math.random() - 0.5) * CONFIG.rainSpawnWidth;
-              newZ = 50 - Math.random() * CONFIG.rainSpawnDepth;
-              if (Math.sin(newX * 0.015 + newZ * 0.015 + time * 3.0) > CONFIG.rainSheetThreshold) break;
-            }
-            x = newX;
-            z = newZ;
-            rainDriftX[i] = (Math.random() - 0.5) * CONFIG.rainDriftBias;
-            rainDriftZ[i] = (Math.random() - 0.5) * CONFIG.rainDriftBias;
-          }
+      // Update GPU Uniforms
+      sharedUniforms.uTime.value = time;
+      sharedUniforms.uGust.value = gustFactor;
+      sharedUniforms.uWindAngle.value = windAngle;
+      sharedUniforms.uDriftOffset.value.copy(driftOffset);
 
-          posArr[i * 3]     = x;
-          posArr[i * 3 + 1] = y;
-          posArr[i * 3 + 2] = z;
+      composer.render();
+      
+      if (showFps) {
+        frames++;
+        const now = performance.now();
+        if (now >= lastFpsTime + 1000) {
+          fpsEl.innerText = `FPS: ${Math.round((frames * 1000) / (now - lastFpsTime))}`;
+          frames = 0;
+          lastFpsTime = now;
         }
-        posAttr.needsUpdate = true;
+      }
+      
+      requestAnimationFrame(animate);
+    };
 
-        // --- Ripple updates (only iterate active slots) ---
-        let matrixUpdated = false;
-        let colorUpdated  = false;
-
-        for (const i of activeRippleIndices) {
-          rippleAge[i] += dt;
-          if (rippleAge[i] >= rippleMaxAge[i]) {
-            activeRippleIndices.delete(i);
-            spawnSplash(rippleX[i], rippleZ[i], rippleMaxScale[i], rippleMaxAge[i]);
-            dummyMatrix.setPosition(0, -100, 0);
-            rippleMesh.setMatrixAt(i, dummyMatrix);
-            matrixUpdated = true;
-            continue;
-          }
-
-          const progress = rippleAge[i] / rippleMaxAge[i];
-          const easeExp  = 1.0 - Math.pow(1.0 - progress, 3.0);
-          const s        = easeExp * rippleMaxScale[i];
-
-          rippleScaleVec.set(s, s, s);
-          ripplePos.set(rippleX[i], 0.01, rippleZ[i]);
-          dummyMatrix.compose(ripplePos, rippleQuat, rippleScaleVec);
-          rippleMesh.setMatrixAt(i, dummyMatrix);
-          matrixUpdated = true;
-
-          const alpha = Math.max(0, 1.0 - progress);
-          dummyColor.setRGB(alpha, alpha, alpha);
-          rippleMesh.setColorAt(i, dummyColor);
-          colorUpdated = true;
-        }
-
-        if (matrixUpdated) rippleMesh.instanceMatrix.needsUpdate = true;
-        if (colorUpdated && rippleMesh.instanceColor) rippleMesh.instanceColor.needsUpdate = true;
-
-        // --- Splash disc updates — throttled to every 3rd frame (idea 8) ---
-        if (updateSplashes) {
-          let splashMatrixUpdated = false;
-          let splashColorUpdated  = false;
-
-          for (const i of activeSplashIndices) {
-            splashAge[i] += dt * 3; // compensate: age advances 3 frames worth at once
-            if (splashAge[i] >= splashMaxAge[i]) {
-              activeSplashIndices.delete(i);
-              dummyMatrix.setPosition(0, -100, 0);
-              splashMesh.setMatrixAt(i, dummyMatrix);
-              splashMatrixUpdated = true;
-              continue;
-            }
-
-            const fadeAlpha = Math.max(0, 1.0 - splashAge[i] / splashMaxAge[i]);
-            splashScaleVec.set(splashScale[i], splashScale[i], splashScale[i]);
-            splashPos.set(splashX[i], 0.005, splashZ[i]);
-            dummyMatrix.compose(splashPos, rippleQuat, splashScaleVec);
-            splashMesh.setMatrixAt(i, dummyMatrix);
-            splashMatrixUpdated = true;
-
-            dummyColor.setRGB(fadeAlpha, fadeAlpha, fadeAlpha);
-            splashMesh.setColorAt(i, dummyColor);
-            splashColorUpdated = true;
-          }
-
-          // idea 2: only upload GPU buffers on frames where splash actually ran
-          if (splashMatrixUpdated) splashMesh.instanceMatrix.needsUpdate = true;
-          if (splashColorUpdated && splashMesh.instanceColor) splashMesh.instanceColor.needsUpdate = true;
-        }
-
-        composer.render();
-        requestAnimationFrame(animate);
-      };
-
-      animate();
-
-    } catch (err) {
+    animate();
+} catch (err) {
       console.error(err);
       const errorDiv = document.getElementById('error');
       errorDiv.style.display = 'block';
