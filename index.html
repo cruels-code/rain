@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Rain</title>
+  <title>Rain & Ripples - Noise Driven Emitter</title>
   <style>
     body {
       margin: 0;
@@ -34,7 +34,7 @@
       color: rgba(255, 255, 255, 0.7);
       font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
       font-weight: 100;
-      font-size: 16px;
+      font-size: 11px;
       z-index: 1000;
       display: none;
       pointer-events: none;
@@ -67,6 +67,19 @@
       width: 150px;
       accent-color: rgba(255, 255, 255, 0.6);
     }
+    #help-text {
+      position: absolute;
+      bottom: 1%;
+      left: 1%;
+      color: rgba(255, 255, 255, 0.4);
+      font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      font-weight: 100;
+      font-size: 11px;
+      line-height: 1.4;
+      z-index: 1000;
+      pointer-events: none;
+      display: none;
+    }
   </style>
   <script type="importmap">
     {
@@ -80,12 +93,17 @@
 <body>
   <div id="fps">FPS: 0</div>
   <div id="error"></div>
+  <div id="help-text">
+    On first load this artwork tests your device and sets the particle amount to ensure 30 FPS<br><br>
+    Controls/Overrides:<br><br>
+    f = fps/particle count<br>
+    x = increase particle count by 100k<br>
+    z = decrease particle count by 100k<br>
+    s = save settings<br>
+    Up/Down arrows = camera angle
+  </div>
   <script type="module">
     import * as THREE from 'three';
-    import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-    import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-    import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-    import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
     // ============================================================
     //  JS Simplex Noise 3D Implementation
@@ -158,13 +176,9 @@
       cameraDriftRadius:     80.0,    // how far it wanders from origin
 
       // --- Depth of Field ---
-      focusDist:             100.0,
-      aperture:              25.0,    // Multiplier for the circle of confusion
-
-      // --- HDR Bloom ---
-      bloomStrength:         0.0375,
-      bloomRadius:           0.5,
-      bloomThreshold:        1.0,     // pixels brighter than 1.0 will bloom
+      focusDist:             89.0,    // matches distance to ground at center screen
+      dofBand:               35.0,    // how wide the perfectly in-focus band is
+      aperture:              0.25,    // Multiplier for the circle of confusion
 
       // --- Perlin Emitter (Invisible) ---
       noiseScale:            0.01,   // scale of rain blobs
@@ -174,7 +188,7 @@
       minRainChance:         0.015,   // base probability for sparse rain everywhere
 
       // --- Rain ---
-      rainCount:             3000000,  
+      rainCount:             10000000,  
       rainSpawnWidth:        2400,    
       rainSpawnDepth:        4000,    
       rainFallSpeedMin:      50.0,    
@@ -197,7 +211,7 @@
       gustDecay:             0.5,     
 
       // --- Ripples ---
-      rippleCount:           3000000,  
+      rippleCount:           10000000,  
       rippleMaxScale:        2.25,     
       rippleSizeVariance:    0.35,    
       rippleLifeMin:         0.8,     
@@ -227,17 +241,8 @@
       const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-      renderer.toneMapping = THREE.ReinhardToneMapping;
+      renderer.toneMapping = THREE.NoToneMapping;
       document.body.appendChild(renderer.domElement);
-
-      const renderScene = new RenderPass(scene, camera);
-      const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), CONFIG.bloomStrength, CONFIG.bloomRadius, CONFIG.bloomThreshold);
-      const outputPass = new OutputPass();
-
-      const composer = new EffectComposer(renderer);
-      composer.addPass(renderScene);
-      composer.addPass(bloomPass);
-      composer.addPass(outputPass);
 
       
     // ============================================================
@@ -314,6 +319,9 @@
       uGust: { value: 1.0 },
       uWindAngle: { value: 0 },
       uDriftOffset: { value: new THREE.Vector2(0, 0) },
+      focusDist: { value: CONFIG.focusDist },
+      dofBand: { value: CONFIG.dofBand },
+      aperture: { value: CONFIG.aperture },
       maxDist: { value: CONFIG.rainSpawnDepth },
       rainSpawnHeightMin: { value: CONFIG.rainSpawnHeightMin },
       rainSpawnHeightRange: { value: CONFIG.rainSpawnHeightRange },
@@ -333,7 +341,7 @@
 
     const rainMat = new THREE.ShaderMaterial({
       uniforms: Object.assign({}, sharedUniforms, {
-        color: { value: new THREE.Color(3.0, 3.0, 3.0) },
+        color: { value: new THREE.Color(5.0, 5.0, 5.0) },
         nearOpacity: { value: 0.90 },
         farOpacity: { value: 0.00 },
         focusDist: { value: CONFIG.focusDist },
@@ -348,8 +356,6 @@
         uniform float uGust;
         uniform float uWindAngle;
         uniform vec2 uDriftOffset;
-        uniform float focusDist;
-        uniform float aperture;
         uniform float rainSpawnHeightMin;
         uniform float rainSpawnHeightRange;
         
@@ -404,6 +410,9 @@
           vec3 axis = cross(up, velocity);
           float angle = acos(dot(up, velocity));
           
+          vec4 worldCenter = modelMatrix * vec4(pos, 1.0);
+          vec4 viewCenter = viewMatrix * worldCenter;
+          
           // Rotate drop to face velocity
           vec3 v = position;
           v.y *= streak;
@@ -412,16 +421,9 @@
           v = v * cos(angle) + cross(axis, v) * sin(angle) + axis * dot(axis, v) * (1.0 - cos(angle));
           v += pos;
           
-          vec4 worldCenter = modelMatrix * vec4(pos, 1.0);
-          vec4 viewCenter = viewMatrix * worldCenter;
-          float centerDist = -viewCenter.z;
-          
-          float coc = abs(centerDist - focusDist) * (aperture / 1000.0);
-          vBlurScale = 1.0 + coc * 10.0;
-          
           vec4 mvPosition = viewMatrix * modelMatrix * vec4(v, 1.0);
-          vDist = -mvPosition.z;
           gl_Position = projectionMatrix * mvPosition;
+          vDist = -mvPosition.z;
         }
       `,
       fragmentShader: `
@@ -432,12 +434,10 @@
         
         varying float vDist;
         varying float vBaseAlpha;
-        varying float vBlurScale;
         
         void main() {
           float t = clamp(vDist / maxDist, 0.0, 1.0);
           float op = mix(nearOpacity, farOpacity, t) * vBaseAlpha;
-          op = op / (vBlurScale * 0.8);
           gl_FragColor = vec4(color, op);
         }
       `,
@@ -573,7 +573,10 @@
     const clock          = new THREE.Clock();
     let frames           = 0;
     let lastFpsTime      = performance.now();
-    let currentParticleCount = CONFIG.rainCount;
+    let currentParticleCount = 1000000;
+    
+    rainGeom.instanceCount = currentParticleCount;
+    rippleGeom.instanceCount = currentParticleCount;
 
     const handleResize = () => {
       const w = window.innerWidth;
@@ -602,7 +605,6 @@
       camera.position.y = CONFIG.cameraHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
-      composer.setSize(w, h);
 
       const heightSlider = document.getElementById('height-slider');
       const heightVal = document.getElementById('height-val');
@@ -619,18 +621,57 @@
     window.addEventListener('resize', handleResize);
     handleResize(); // Call once to initialize orientation perfectly
 
-    // Toggle rain visibility on click
+    // Toggle help visibility on click
     renderer.domElement.addEventListener('click', () => {
-      rainMesh.visible = !rainMesh.visible;
+      const helpEl = document.getElementById('help-text');
+      helpEl.style.display = helpEl.style.display === 'block' ? 'none' : 'block';
     });
 
     const fpsEl = document.getElementById('fps');
     let showFps = false;
+    let manualOverride = false;
+
+    // Load saved settings if they exist
+    const savedCount = localStorage.getItem('gpuRainParticleCount');
+    if (savedCount) {
+      currentParticleCount = parseInt(savedCount, 10);
+      manualOverride = true;
+    }
 
     window.addEventListener('keydown', (e) => {
       if (e.key === 'f' || e.key === 'F') {
         showFps = !showFps;
         fpsEl.style.display = showFps ? 'block' : 'none';
+      }
+      if (e.key === 'x' || e.key === 'X') {
+        manualOverride = true;
+        currentParticleCount = Math.min(CONFIG.rainCount, currentParticleCount + 100000);
+        rainGeom.instanceCount = currentParticleCount;
+        rippleGeom.instanceCount = currentParticleCount;
+        if (showFps) fpsEl.innerText = `FPS: -- | Particles: ${currentParticleCount.toLocaleString()}`;
+      }
+      if (e.key === 'z' || e.key === 'Z') {
+        manualOverride = true;
+        currentParticleCount = Math.max(100000, currentParticleCount - 100000);
+        rainGeom.instanceCount = currentParticleCount;
+        rippleGeom.instanceCount = currentParticleCount;
+        if (showFps) fpsEl.innerText = `FPS: -- | Particles: ${currentParticleCount.toLocaleString()}`;
+      }
+      if (e.key === 's' || e.key === 'S') {
+        localStorage.setItem('gpuRainParticleCount', currentParticleCount.toString());
+        const helpEl = document.getElementById('help-text');
+        const oldHtml = helpEl.innerHTML;
+        helpEl.innerHTML = "<b>Settings Saved!</b>";
+        helpEl.style.display = 'block';
+        setTimeout(() => { helpEl.innerHTML = oldHtml; helpEl.style.display = 'none'; }, 1500);
+      }
+      if (e.key === 'ArrowUp') {
+        CONFIG.cameraTiltDeg = Math.min(0, CONFIG.cameraTiltDeg + 1);
+        camera.rotation.set(CONFIG.cameraTiltDeg * Math.PI / 180, 0, 0);
+      }
+      if (e.key === 'ArrowDown') {
+        CONFIG.cameraTiltDeg = Math.max(-90, CONFIG.cameraTiltDeg - 1);
+        camera.rotation.set(CONFIG.cameraTiltDeg * Math.PI / 180, 0, 0);
       }
     });
 
@@ -640,8 +681,9 @@
       requestAnimationFrame(animate);
 
       const nowFrame = performance.now();
-      if (nowFrame - lastFrameTime < 16.0) return; // Cap max framerate to ~60 FPS
-      lastFrameTime = nowFrame;
+      const deltaFrame = nowFrame - lastFrameTime;
+      if (deltaFrame < 16.0) return; // Cap max framerate to ~60 FPS
+      lastFrameTime = nowFrame - (deltaFrame % 16.0);
 
       const dt   = Math.min(clock.getDelta(), 0.1) * CONFIG.speedMultiplier;
       const time = clock.getElapsedTime() * CONFIG.speedMultiplier;
@@ -672,7 +714,7 @@
       sharedUniforms.uWindAngle.value = windAngle;
       sharedUniforms.uDriftOffset.value.copy(driftOffset);
 
-      composer.render();
+      renderer.render(scene, camera);
       
       frames++;
       const now = performance.now();
@@ -683,15 +725,15 @@
         }
         
         // Dynamic Resolution / Particle Scaling
-        if (now > 4000) { // Wait 4 seconds for shader compilation and load jitter
+        if (!manualOverride && now > 4000) { // Wait 4 seconds for shader compilation and load jitter
            if (fps < 30) {
               // Too slow! Drop particle count by 20%
               currentParticleCount = Math.max(1000000, Math.floor(currentParticleCount * 0.8));
               rainGeom.instanceCount = currentParticleCount;
               rippleGeom.instanceCount = currentParticleCount;
-           } else if (fps > 55 && currentParticleCount < CONFIG.rainCount) {
-              // Plenty of headroom, scale up by 5%
-              currentParticleCount = Math.min(CONFIG.rainCount, Math.floor(currentParticleCount * 1.05));
+           } else if (fps >= 55 && currentParticleCount < 5000000) {
+              // Plenty of headroom, scale up by 25% quickly
+              currentParticleCount = Math.min(5000000, Math.floor(currentParticleCount * 1.25));
               rainGeom.instanceCount = currentParticleCount;
               rippleGeom.instanceCount = currentParticleCount;
            }
